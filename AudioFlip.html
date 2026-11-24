@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AudioFlip</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f2f2f2; --text: #333;
+    --red: #e53935; --blue: #1e88e5; --green: #43a047;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #121212; --text: #ddd; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --bg: #121212; --text: #ddd; color-scheme: dark; }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; padding: 16px; gap: 16px; box-sizing: border-box;
+  }
+  button {
+    flex: 1; border: 0; border-radius: 28px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button:active { filter: brightness(.75); }
+  button svg { width: 38%; max-width: 120px; height: auto; fill: #fff; }
+  #rec { background: var(--red); }
+  #play { background: var(--blue); }
+  #rev { background: var(--green); }
+  #status { text-align: center; font-size: 15px; min-height: 20px; }
+</style>
+</head>
+<body>
+  <button id="rec" aria-label="Record">
+    <svg id="icon" viewBox="0 0 24 24"></svg>
+  </button>
+  <button id="play" aria-label="Play">
+    <svg viewBox="0 0 24 24"><path d="M7 4v16l13-8z"/></svg>
+  </button>
+  <button id="rev" aria-label="Play in reverse">
+    <svg viewBox="0 0 24 24"><path d="M17 4v16L4 12z"/></svg>
+  </button>
+  <div id="status">Tap the red button to record</div>
+
+<script>
+  const MIC = '<path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2z"/>';
+  const STOP = '<rect x="6" y="6" width="12" height="12" rx="2"/>';
+  const icon = document.getElementById('icon');
+  const status = document.getElementById('status');
+  icon.innerHTML = MIC;
+
+  let ctx, recorder, stream, chunks = [], buffer = null, source = null, recording = false;
+
+  function setStatus(t) { status.textContent = t; }
+
+  function stopPlayback() {
+    if (source) { try { source.stop(); } catch (e) {} source = null; }
+  }
+
+  async function startRecording() {
+    stopPlayback();
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      setStatus('Microphone blocked. Allow mic access and try again.');
+      return;
+    }
+    ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+    buffer = null;               // previous clip is deleted
+    chunks = [];
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = e => chunks.push(e.data);
+    recorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      try {
+        const data = await new Blob(chunks).arrayBuffer();
+        buffer = await ctx.decodeAudioData(data);
+        setStatus('Saved. Tap play or reverse.');
+      } catch (e) { setStatus('Could not save that recording.'); }
+    };
+    recorder.start();
+    recording = true;
+    icon.innerHTML = STOP;
+    setStatus('Recording… tap to stop');
+  }
+
+  function stopRecording() {
+    recording = false;
+    icon.innerHTML = MIC;
+    recorder.stop();
+  }
+
+  document.getElementById('rec').onclick = () => recording ? stopRecording() : startRecording();
+
+  function play(reverse) {
+    if (recording) stopRecording();
+    if (!buffer) { setStatus('Nothing recorded yet'); return; }
+    stopPlayback();
+    ctx.resume();
+    let buf = buffer;
+    if (reverse) {
+      buf = ctx.createBuffer(buffer.numberOfChannels, buffer.length, buffer.sampleRate);
+      for (let c = 0; c < buffer.numberOfChannels; c++) {
+        buf.getChannelData(c).set(buffer.getChannelData(c).slice().reverse());
+      }
+    }
+    source = ctx.createBufferSource();
+    source.buffer = buf;
+    source.connect(ctx.destination);
+    source.start();
+    setStatus(reverse ? 'Playing in reverse' : 'Playing');
+  }
+
+  document.getElementById('play').onclick = () => play(false);
+  document.getElementById('rev').onclick = () => play(true);
+</script>
+</body>
+</html>
